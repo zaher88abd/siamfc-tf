@@ -2,20 +2,14 @@ from __future__ import division
 import sys
 import os
 
-import csv
 import time
 import numpy as np
 import cv2
 import tensorflow as tf
 
-from PIL import Image
 import src.siamese as siam
-from src.tracker import tracker
 from src.parse_arguments import parse_arguments
-from src.region_to_bbox import region_to_bbox
-from src.visualization import show_frame, show_crops, show_scores
-
-import matplotlib.pyplot as plt
+from src.visualization import show_frame
 
 roi_list = []
 refPt = []
@@ -54,6 +48,7 @@ def draw_roi(event, x, y, flags, param):
     # if the left mouse button was clicked, record the starting
     # (x, y) coordinates and indicate that cropping is being
     # performed
+    clone = param[0]
     if event == cv2.EVENT_LBUTTONDOWN:
         refPt = [(x, y)]
 
@@ -64,7 +59,7 @@ def draw_roi(event, x, y, flags, param):
         refPt.append((x, y))
 
         # draw a rectangle around the region of interest
-        clone = param[0]
+        # clone = param[0]
         cv2.rectangle(clone, refPt[0], refPt[1], (0, 255, 0), 2)
         roi_list.append(refPt)
         cv2.imshow(param[1], clone)
@@ -73,6 +68,7 @@ def draw_roi(event, x, y, flags, param):
 def get_roi(img, w_text="N/A"):
     imgcl = img.copy()
     global roi_list
+    global refPt
     cv2.namedWindow("Set Regions for " + w_text)
     cv2.setMouseCallback("Set Regions for " + w_text, draw_roi, [imgcl, "Set Regions for " + w_text])
 
@@ -83,10 +79,13 @@ def get_roi(img, w_text="N/A"):
         key = cv2.waitKey(1) & 0xFF
 
         # if the 'r' key is pressed, reset the cropping region
-        if key == ord("n"):
-            roi_list.append(refPt)
+        if key == ord("r"):
             refPt = []
-            print(roi_list)
+            roi_list = []
+            imgcl = img.copy()
+            cv2.imshow("Set Regions for " + w_text, imgcl)
+            cv2.setMouseCallback("Set Regions for " + w_text, draw_roi, [imgcl, "Set Regions for " + w_text])
+            print("reset")
 
         # if the 'c' key is pressed, break from the loop
         if key == ord("c"):
@@ -94,39 +93,10 @@ def get_roi(img, w_text="N/A"):
             return roi_list
 
 
-# def main():
-#     # avoid printing TF debugging information
-#     os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
-#     # TODO: allow parameters from command line or leave everything in json files?
-#     hp, evaluation, run, env, design = parse_arguments()
-#     # Set size for use with tf.image.resize_images with align_corners=True.
-#     # For example,
-#     #   [1 4 7] =>   [1 2 3 4 5 6 7]    (length 3*(3-1)+1)
-#     # instead of
-#     # [1 4 7] => [1 1 2 3 4 5 6 7 7]  (length 3*3)
-#     final_score_sz = hp.response_up * (design.score_sz - 1) + 1
-#     # build TF graph once for all
-#     filename, image, templates_z, scores = siam.build_tracking_graph(final_score_sz, design, env)
-
-#     gt, frame_name_list, _, _ = _init_video(env, evaluation, evaluation.video)
-#     pos_x, pos_y, target_w, target_h = region_to_bbox(gt[evaluation.start_frame])
-#     bboxes, speed = tracker(hp, run, design, frame_name_list, pos_x, pos_y, target_w, target_h, final_score_sz,
-#                             filename, image, templates_z, scores, evaluation.start_frame)
-#     _, precision, precision_auc, iou = _compile_results(gt, bboxes, evaluation.dist_threshold)
-#     print evaluation.video + \
-#           ' -- Precision ' + "(%d px)" % evaluation.dist_threshold + ': ' + "%.2f" % precision +\
-#           ' -- Precision AUC: ' + "%.2f" % precision_auc + \
-#           ' -- IOU: ' + "%.2f" % iou + \
-#           ' -- Speed: ' + "%.2f" % speed + ' --'
-#     print
-
-
 def main_camera():
     cam = cv2.VideoCapture(0)
     if not cam.isOpened():
         exit()
-
-
 
     bboxes = np.zeros((10, 4))
 
@@ -185,6 +155,7 @@ def main_camera():
         new_templates_z_ = templates_z_
 
         t_start = time.time()
+        num_frames = 0
 
         # Get an image from the queue
         while True:
@@ -193,6 +164,7 @@ def main_camera():
             scaled_target_w = target_w * scale_factors
             scaled_target_h = target_h * scale_factors
             ret, frame = cam.read()
+            num_frames += 1
             image_, scores_ = sess.run(
                 [image, scores],
                 feed_dict={
@@ -239,12 +211,17 @@ def main_camera():
 
             # update template patch size
             z_sz = (1 - hp.scale_lr) * z_sz + hp.scale_lr * scaled_exemplar[new_scale_id]
-
+            key = 0
             if run.visualization:
-                show_frame(image_, out, 1)
+                key = show_frame(image_, out)
 
-        t_elapsed = time.time() - t_start
-        speed = num_frames / t_elapsed
+            t_elapsed = time.time() - t_start
+            speed = num_frames / t_elapsed
+            if key == 120:
+                print("Speed", speed)
+                sess.close()
+                cv2.destroyAllWindows()
+                exit()
 
         # Finish off the filename queue coordinator.
         # coord.request_stop()
@@ -254,8 +231,6 @@ def main_camera():
         # trace = timeline.Timeline(step_stats=run_metadata.step_stats)
         # trace_file = open('timeline-search.ctf.json', 'w')
         # trace_file.write(trace.generate_chrome_trace_format())
-
-    plt.close('all')
 
 
 if __name__ == '__main__':
