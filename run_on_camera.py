@@ -30,18 +30,18 @@ def _update_target_position(pos_x, pos_y, score, final_score_sz, tot_stride, sea
     # displacement from the center in instance crop
     disp_in_xcrop = disp_in_area * float(tot_stride) / response_up
     # displacement from the center in instance crop (in frame coordinates)
-    disp_in_frame = disp_in_xcrop *  x_sz / search_sz
+    disp_in_frame = disp_in_xcrop * x_sz / search_sz
     # *position* within frame in frame coordinates
     pos_y, pos_x = pos_y + disp_in_frame[0], pos_x + disp_in_frame[1]
     return pos_x, pos_y
 
 
 def convert_roi(x, y):
-    #x, y are left top and right lower corner
+    # x, y are left top and right lower corner
     w = y[0] - x[0]
     h = y[1] - x[1]
-    cx = x[0] + w/2.0
-    cy = x[1] + h/2.0
+    cx = x[0] + w / 2.0
+    cy = x[1] + h / 2.0
 
     return cx, cy, w, h
 
@@ -83,10 +83,10 @@ def get_roi(img, w_text="N/A"):
         key = cv2.waitKey(1) & 0xFF
 
         # if the 'r' key is pressed, reset the cropping region
-        # if key == ord("n"):
-        #     roi_list.append(refPt)
-        #     refPt = []
-        #     print roi_list
+        if key == ord("n"):
+            roi_list.append(refPt)
+            refPt = []
+            print(roi_list)
 
         # if the 'c' key is pressed, break from the loop
         if key == ord("c"):
@@ -122,11 +122,13 @@ def get_roi(img, w_text="N/A"):
 
 
 def main_camera():
-    cam = cv2.VideoCapture(1)
+    cam = cv2.VideoCapture(0)
     if not cam.isOpened():
         exit()
 
-    bboxes = np.zeros((10,4))
+
+
+    bboxes = np.zeros((10, 4))
 
     # avoid printing TF debugging information
     os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
@@ -147,14 +149,14 @@ def main_camera():
     pos_x, pos_y, target_w, target_h = convert_roi(roi[0][0], roi[0][1])
     # pos_x, pos_y, target_w, target_h = region_to_bbox(gt[evaluation.start_frame])
 
-    scale_factors = hp.scale_step**np.linspace(-np.ceil(hp.scale_num/2), np.ceil(hp.scale_num/2), hp.scale_num)
+    scale_factors = hp.scale_step ** np.linspace(-np.ceil(hp.scale_num / 2), np.ceil(hp.scale_num / 2), hp.scale_num)
     # cosine window to penalize large displacements    
     hann_1d = np.expand_dims(np.hanning(final_score_sz), axis=0)
     penalty = np.transpose(hann_1d) * hann_1d
     penalty = penalty / np.sum(penalty)
 
-    context = design.context*(target_w+target_h)
-    z_sz = np.sqrt(np.prod((target_w+context)*(target_h+context)))
+    context = design.context * (target_w + target_h)
+    z_sz = np.sqrt(np.prod((target_w + context) * (target_h + context)))
     x_sz = float(design.search_sz) / design.exemplar_sz * z_sz
 
     # thresholds to saturate patches shrinking/growing
@@ -170,22 +172,22 @@ def main_camera():
         # Coordinate the loading of image files.
         # coord = tf.train.Coordinator()
         # threads = tf.train.start_queue_runners(coord=coord)
-        
+
         # save first frame position (from ground-truth)
-        bboxes[0,:] = pos_x-target_w/2, pos_y-target_h/2, target_w, target_h                
+        bboxes[0, :] = pos_x - target_w / 2, pos_y - target_h / 2, target_w, target_h
 
         # TODO: convert roi[0] to the silly siam format
         image_, templates_z_ = sess.run([image, templates_z], feed_dict={
-                                                                        siam.pos_x_ph: pos_x,
-                                                                        siam.pos_y_ph: pos_y,
-                                                                        siam.z_sz_ph: z_sz,
-                                                                        image: frame})
+            siam.pos_x_ph: pos_x,
+            siam.pos_y_ph: pos_y,
+            siam.z_sz_ph: z_sz,
+            image: frame})
         new_templates_z_ = templates_z_
 
         t_start = time.time()
 
         # Get an image from the queue
-        while True:        
+        while True:
             scaled_exemplar = z_sz * scale_factors
             scaled_search_area = x_sz * scale_factors
             scaled_target_w = target_w * scale_factors
@@ -204,43 +206,45 @@ def main_camera():
                 }, **run_opts)
             scores_ = np.squeeze(scores_)
             # penalize change of scale
-            scores_[0,:,:] = hp.scale_penalty*scores_[0,:,:]
-            scores_[2,:,:] = hp.scale_penalty*scores_[2,:,:]
+            scores_[0, :, :] = hp.scale_penalty * scores_[0, :, :]
+            scores_[2, :, :] = hp.scale_penalty * scores_[2, :, :]
             # find scale with highest peak (after penalty)
-            new_scale_id = np.argmax(np.amax(scores_, axis=(1,2)))
+            new_scale_id = np.argmax(np.amax(scores_, axis=(1, 2)))
             # update scaled sizes
-            x_sz = (1-hp.scale_lr)*x_sz + hp.scale_lr*scaled_search_area[new_scale_id]        
-            target_w = (1-hp.scale_lr)*target_w + hp.scale_lr*scaled_target_w[new_scale_id]
-            target_h = (1-hp.scale_lr)*target_h + hp.scale_lr*scaled_target_h[new_scale_id]
+            x_sz = (1 - hp.scale_lr) * x_sz + hp.scale_lr * scaled_search_area[new_scale_id]
+            target_w = (1 - hp.scale_lr) * target_w + hp.scale_lr * scaled_target_w[new_scale_id]
+            target_h = (1 - hp.scale_lr) * target_h + hp.scale_lr * scaled_target_h[new_scale_id]
             # select response with new_scale_id
-            score_ = scores_[new_scale_id,:,:]
+            score_ = scores_[new_scale_id, :, :]
             score_ = score_ - np.min(score_)
-            score_ = score_/np.sum(score_)
+            score_ = score_ / np.sum(score_)
             # apply displacement penalty
-            score_ = (1-hp.window_influence)*score_ + hp.window_influence*penalty
-            pos_x, pos_y = _update_target_position(pos_x, pos_y, score_, final_score_sz, design.tot_stride, design.search_sz, hp.response_up, x_sz)
+            score_ = (1 - hp.window_influence) * score_ + hp.window_influence * penalty
+            pos_x, pos_y = _update_target_position(pos_x, pos_y, score_, final_score_sz, design.tot_stride,
+                                                   design.search_sz, hp.response_up, x_sz)
             # convert <cx,cy,w,h> to <x,y,w,h> and save output
-            out = pos_x-target_w/2, pos_y-target_h/2, target_w, target_h
+            out = pos_x - target_w / 2, pos_y - target_h / 2, target_w, target_h
             # out = pos_x-target_w/2, pos_y-target_h/2, target_w, target_h
             # update the target representation with a rolling average
-            if hp.z_lr>0:
-                new_templates_z_ = sess.run([templates_z], feed_dict={
-                                                                siam.pos_x_ph: pos_x,
-                                                                siam.pos_y_ph: pos_y,
-                                                                siam.z_sz_ph: z_sz,
-                                                                image: image_
-                                                                })
 
-                templates_z_=(1-hp.z_lr)*np.asarray(templates_z_) + hp.z_lr*np.asarray(new_templates_z_)
-            
+            if hp.z_lr > 0:
+                new_templates_z_ = sess.run([templates_z], feed_dict={
+                    siam.pos_x_ph: pos_x,
+                    siam.pos_y_ph: pos_y,
+                    siam.z_sz_ph: z_sz,
+                    image: image_
+                })
+
+                templates_z_ = (1 - hp.z_lr) * np.asarray(templates_z_) + hp.z_lr * np.asarray(new_templates_z_)
+
             # update template patch size
-            z_sz = (1-hp.scale_lr)*z_sz + hp.scale_lr*scaled_exemplar[new_scale_id]
-            
+            z_sz = (1 - hp.scale_lr) * z_sz + hp.scale_lr * scaled_exemplar[new_scale_id]
+
             if run.visualization:
-                show_frame(image_, out, 1)        
+                show_frame(image_, out, 1)
 
         t_elapsed = time.time() - t_start
-        speed = num_frames/t_elapsed
+        speed = num_frames / t_elapsed
 
         # Finish off the filename queue coordinator.
         # coord.request_stop()
